@@ -1,0 +1,18 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "DefaultEndpointsProtocol=https;AccountName=YOUR_ACCOUNT;AccountKey=YOUR_KEY;EndpointSuffix=core.windows.net",
+    "FUNCTIONS_WORKER_RUNTIME": "node",
+    "STORAGE_ACCOUNT": "DefaultEndpointsProtocol=https;AccountName=YOUR_ACCOUNT;AccountKey=YOUR_KEY;EndpointSuffix=core.windows.net",
+    "STORAGE_ACCOUNT_NAME": "YOUR_STORAGE_ACCOUNT_NAME",
+    "STORAGE_ACCOUNT_KEY": "YOUR_STORAGE_KEY",
+    "STORAGE_CONTAINER_NAME": "documents",
+    "COSMOS_DB_ENDPOINT": "https://YOUR_ACCOUNT.documents.azure.com:443/",
+    "COSMOS_DB_KEY": "YOUR_COSMOS_KEY",
+    "COSMOS_DB_DATABASE": "docIntelligence",
+    "COSMOS_DB_CONTAINER": "results",
+    "DOCUMENT_INTELLIGENCE_ENDPOINT": "https://YOUR_RESOURCE.cognitiveservices.azure.com/",
+    "DOCUMENT_INTELLIGENCE_KEY": "YOUR_DOC_INTELLIGENCE_KEY",
+    "AZURE_SIGNALR_CONNECTION_STRING": "YOUR_SIGNALR_CONNECTION_STRING"
+  }
+}

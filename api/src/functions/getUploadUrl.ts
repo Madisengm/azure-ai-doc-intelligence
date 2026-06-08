@@ -3,7 +3,7 @@ import { BlobServiceClient, StorageSharedKeyCredential, generateBlobSASQueryPara
 
 const ALLOWED_ORIGINS = [
     "http://localhost:4200",
-    "https://your-app.azurestaticapps.net",
+    "https://salmon-wave-012e1d61e.7.azurestaticapps.net",
 ];
 
 const ALLOWED_TYPES = [
