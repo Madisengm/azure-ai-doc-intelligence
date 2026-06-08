@@ -1,4 +1,4 @@
-import { app, InvocationContext } from "@azure/functions";
+import { app, HttpRequest, HttpResponseInit, InvocationContext } from "@azure/functions";
 import { BlobService } from "../services/blobService";
 import { CosmosService } from "../services/cosmosService";
 import { DocumentIntelligenceService } from "../services/documentIntelligenceService";
@@ -9,47 +9,70 @@ const blobService   = new BlobService();
 const cosmosService = new CosmosService();
 const aiService     = new DocumentIntelligenceService();
 
+const ALLOWED_ORIGINS = [
+    "http://localhost:4200",
+    "https://salmon-wave-012e1d61e.7.azurestaticapps.net",
+];
+
 export async function processDocument(
-    blob: Buffer,
+    request: HttpRequest,
     context: InvocationContext
-): Promise<void> {
-    const blobName = context.triggerMetadata?.["name"] as string;
-    context.log(`processDocument triggered for blob: ${blobName}`);
+): Promise<HttpResponseInit> {
+    context.log(`processDocument triggered: ${request.method}`);
 
-    const blobParts    = blobName.split('/');
-    const documentType = blobParts[0] ?? 'unknown';
-    const fileSegment  = blobParts[1] ?? blobName;
-    const fileName     = fileSegment.replace(/^\d+-/, '');
-    const resultId     = randomUUID();
+    const origin = request.headers.get("origin") ?? "";
+    const allowedOrigin = ALLOWED_ORIGINS.indexOf(origin) !== -1 ? origin : ALLOWED_ORIGINS[0];
 
-    const extension = fileName.split('.').pop()?.toLowerCase();
-    const contentTypeMap: Record<string, string> = {
-        pdf:  'application/pdf',
-        jpg:  'image/jpeg',
-        jpeg: 'image/jpeg',
-        png:  'image/png',
-        tiff: 'image/tiff',
-    };
-    const contentType = contentTypeMap[extension ?? ''] ?? 'application/pdf';
-
-    const processingRecord: ExtractionResult = {
-        id:           resultId,
-        blobName,
-        documentType,
-        fileName,
-        processedAt:  new Date().toISOString(),
-        status:       'processing',
-        fields:       {},
-        pageCount:    0,
+    const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": allowedOrigin,
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type",
     };
 
-    await cosmosService.saveResult(processingRecord);
-    context.log(`Processing record saved with id: ${resultId}`);
+    if (request.method === "OPTIONS") {
+        return { status: 204, headers };
+    }
 
     try {
-        context.log(`Sending to Document Intelligence — model based on type: ${documentType}`);
-        const extraction = await aiService.analyseDocument(blob, documentType);
-        context.log(`Extraction complete. Fields found: ${Object.keys(extraction.fields).length}`);
+        const body = await request.json() as {
+            blobName: string;
+            documentType: string;
+        };
+
+        const { blobName, documentType } = body;
+
+        if (!blobName || !documentType) {
+            return {
+                status: 400,
+                headers,
+                jsonBody: { error: "blobName and documentType are required" }
+            };
+        }
+
+        const fileSegment = blobName.split('/')[1] ?? blobName;
+        const fileName    = fileSegment.replace(/^\d+-/, '');
+        const resultId    = randomUUID();
+
+        const processingRecord: ExtractionResult = {
+            id:          resultId,
+            blobName,
+            documentType: documentType as any,
+            fileName,
+            processedAt: new Date().toISOString(),
+            status:      'processing',
+            fields:      {},
+            pageCount:   0,
+        };
+
+        await cosmosService.saveResult(processingRecord);
+        context.log(`Processing record saved: ${resultId}`);
+
+        const buffer    = await blobService.downloadBlob(blobName);
+        context.log(`Blob downloaded: ${blobName}`);
+
+        const extraction = await aiService.analyseDocument(buffer, documentType);
+        context.log(`Extraction complete. Fields: ${Object.keys(extraction.fields).length}`);
 
         const completedRecord: ExtractionResult = {
             ...processingRecord,
@@ -59,21 +82,26 @@ export async function processDocument(
         };
 
         await cosmosService.saveResult(completedRecord);
-        context.log(`Completed result saved for: ${fileName}`);
+        context.log(`Completed result saved: ${resultId}`);
+
+        return {
+            status: 200,
+            headers,
+            jsonBody: { id: resultId, status: 'completed' }
+        };
 
     } catch (error: any) {
-        context.error(`Document Intelligence failed for ${blobName}:`, error);
-
-        await cosmosService.saveResult({
-            ...processingRecord,
-            status: 'failed',
-            error:  error?.message ?? 'Unknown processing error',
-        });
+        context.error("processDocument error:", error);
+        return {
+            status: 500,
+            headers,
+            jsonBody: { error: error?.message ?? "Processing failed" }
+        };
     }
 }
 
-app.storageBlob("process-document", {
-    path: `${process.env["STORAGE_CONTAINER_NAME"] ?? "documents"}/{name}`,
-    connection: "STORAGE_ACCOUNT",
+app.http("process-document", {
+    methods: ["POST", "OPTIONS"],
+    authLevel: "anonymous",
     handler: processDocument,
 });

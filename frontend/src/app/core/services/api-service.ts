@@ -25,4 +25,11 @@ export class ApiService {
   getResultById(id: string): Observable<ExtractionResult> {
     return this.http.get<ExtractionResult>(`${this.base}/results/${id}`);
   }
+
+  processDocument(blobName: string, documentType: string): Observable<{ id: string; status: string }> {
+    return this.http.post<{ id: string; status: string }>(
+      `${this.base}/process-document`,
+      { blobName, documentType }
+    );
+  }
 }

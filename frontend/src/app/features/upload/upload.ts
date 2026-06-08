@@ -83,9 +83,15 @@ export class Upload {
       next: progress => {
         this.uploadPercent.set(progress.percent);
 
-        if (progress.percent === 100) {
+        if (progress.processingDone) {
           this.uploadState.set('success');
-          setTimeout(() => this.router.navigate(['/history']), 1500);
+          setTimeout(() => {
+            if (progress.resultId) {
+              this.router.navigate(['/result', progress.resultId]);
+            } else {
+              this.router.navigate(['/history']);
+            }
+          }, 1500);
         }
       },
       error: err => {

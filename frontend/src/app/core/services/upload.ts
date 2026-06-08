@@ -10,11 +10,13 @@ export interface UploadProgress {
   blobName?: string;
   documentType?: DocumentType;
   sasUrl?: string;
+  resultId?: string;
+  processingDone?: boolean;
 }
 
 @Injectable({ providedIn: 'root' })
 export class UploadService {
-  private http      = inject(HttpClient);
+  private http       = inject(HttpClient);
   private apiService = inject(ApiService);
 
   readonly ALLOWED_TYPES = [
@@ -43,8 +45,8 @@ export class UploadService {
 
     return new Observable(observer => {
       this.apiService.getUploadUrl({
-        fileName:     file.name,
-        fileType:     file.type,
+        fileName: file.name,
+        fileType: file.type,
         documentType,
       }).subscribe({
         next: (urlResponse: UploadUrlResponse) => {
@@ -75,13 +77,42 @@ export class UploadService {
                 percent:      100,
                 blobName:     urlResponse.blobName,
                 documentType: urlResponse.documentType,
-                sasUrl:       urlResponse.sasUrl,
               } as UploadProgress;
             })
           ).subscribe({
-            next:     progress => observer.next(progress),
-            error:    err      => observer.error(err),
-            complete: ()       => observer.complete(),
+            next: progress => {
+              observer.next(progress);
+
+              if (progress.percent === 100 && progress.blobName) {
+                this.apiService.processDocument(
+                  progress.blobName,
+                  progress.documentType!
+                ).subscribe({
+                  next: (result) => {
+                    observer.next({
+                      percent:        100,
+                      blobName:       progress.blobName,
+                      documentType:   progress.documentType,
+                      resultId:       result.id,
+                      processingDone: true,
+                    });
+                    observer.complete();
+                  },
+                  error: (err) => {
+                    console.error('processDocument failed:', err);
+                    observer.next({
+                      percent:        100,
+                      blobName:       progress.blobName,
+                      documentType:   progress.documentType,
+                      processingDone: true,
+                    });
+                    observer.complete();
+                  }
+                });
+              }
+            },
+            error:    err => observer.error(err),
+            complete: ()  => { },
           });
         },
         error: err => observer.error(err),
