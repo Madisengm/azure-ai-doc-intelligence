@@ -1,0 +1,131 @@
+<div class="min-h-screen bg-slate-50 p-6 md:p-12">
+  <div class="max-w-3xl mx-auto">
+
+    <!-- Header -->
+    <div class="mb-10">
+      <h1 class="text-3xl font-bold text-slate-800">
+        Document Intelligence
+      </h1>
+      <p class="text-slate-500 mt-1">
+        Upload a document and let Azure AI extract structured data from it.
+      </p>
+    </div>
+
+    <!-- Step 1: Document type -->
+    <div class="mb-8">
+      <h2 class="text-sm font-semibold uppercase tracking-widest text-slate-400 mb-4">
+        Step 1 — Select document type
+      </h2>
+      <div class="grid grid-cols-2 md:grid-cols-3 gap-3">
+        @for (entry of documentTypes; track entry[0]) {
+          <div
+            (click)="selectType(entry[0])"
+            class="p-4 rounded-xl border-2 cursor-pointer transition-all"
+            [class]="selectedType() === entry[0]
+              ? 'border-primary bg-blue-50 shadow-md scale-105'
+              : 'border-slate-200 bg-white hover:border-primary hover:scale-105'">
+            <div class="text-2xl mb-1">{{ entry[1].icon }}</div>
+            <div class="font-semibold text-slate-700 text-sm">{{ entry[1].label }}</div>
+            <div class="text-slate-400 text-xs mt-1">{{ entry[1].description }}</div>
+          </div>
+        }
+      </div>
+    </div>
+
+    <!-- Step 2: File upload -->
+    <div class="mb-8">
+      <h2 class="text-sm font-semibold uppercase tracking-widest text-slate-400 mb-4">
+        Step 2 — Upload your document
+      </h2>
+
+      <!-- Drag and drop zone -->
+      <div
+        (dragover)="onDragOver($event)"
+        (dragleave)="onDragLeave()"
+        (drop)="onDrop($event)"
+        [class.drag-over]="isDragOver()"
+        class="border-2 border-dashed border-slate-300 rounded-2xl p-10 text-center transition-all cursor-pointer bg-white hover:border-primary"
+        (click)="fileInput.click()">
+
+        @if (selectedFile()) {
+          <div class="flex flex-col items-center gap-2">
+            <span class="text-4xl">📎</span>
+            <p class="font-semibold text-slate-700">{{ selectedFile()!.name }}</p>
+            <p class="text-slate-400 text-sm">
+              {{ (selectedFile()!.size / 1024 / 1024).toFixed(2) }} MB
+            </p>
+            <button
+              (click)="$event.stopPropagation(); reset()"
+              class="text-xs text-red-400 hover:text-red-600 mt-1">
+              Remove
+            </button>
+          </div>
+        } @else {
+          <div class="flex flex-col items-center gap-2 text-slate-400">
+            <span class="text-4xl">☁️</span>
+            <p class="font-medium">Drag & drop your file here</p>
+            <p class="text-sm">or click to browse</p>
+            <p class="text-xs mt-2">PDF, JPEG, PNG, TIFF — max 10MB</p>
+          </div>
+        }
+
+        <input
+          #fileInput
+          type="file"
+          class="hidden"
+          accept=".pdf,.jpg,.jpeg,.png,.tiff"
+          (change)="onFileSelected($event)" />
+      </div>
+    </div>
+
+    <!-- Error message -->
+    @if (errorMessage()) {
+      <div class="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl text-red-600 text-sm">
+        ⚠️ {{ errorMessage() }}
+      </div>
+    }
+
+    <!-- Upload progress -->
+    @if (uploadState() === 'uploading') {
+      <div class="mb-6">
+        <div class="flex justify-between text-sm text-slate-500 mb-2">
+          <span>Uploading to Azure Blob Storage...</span>
+          <span>{{ uploadPercent() }}%</span>
+        </div>
+        <div class="w-full bg-slate-200 rounded-full h-2">
+          <div
+            class="bg-primary h-2 rounded-full transition-all duration-300"
+            [style.width.%]="uploadPercent()">
+          </div>
+        </div>
+      </div>
+    }
+
+    <!-- Success state -->
+    @if (uploadState() === 'success') {
+      <div class="mb-6 p-4 bg-green-50 border border-green-200 rounded-xl text-green-700 text-sm font-medium">
+        ✅ Upload complete — Azure AI is processing your document. Redirecting to history...
+      </div>
+    }
+
+    <!-- Actions -->
+    <div class="flex gap-4">
+      <button
+        (click)="upload()"
+        [disabled]="!canUpload"
+        class="flex-1 bg-primary hover:bg-blue-700 text-white font-bold py-4 rounded-xl uppercase tracking-widest transition-all active:scale-95 disabled:opacity-40 disabled:pointer-events-none shadow-md">
+        @if (uploadState() === 'uploading') {
+          Processing...
+        } @else {
+          Analyse Document
+        }
+      </button>
+
+      <a routerLink="/history"
+        class="px-6 py-4 border-2 border-slate-200 rounded-xl text-slate-500 font-bold uppercase tracking-widest hover:border-primary hover:text-primary transition-all">
+        History
+      </a>
+    </div>
+
+  </div>
+</div>

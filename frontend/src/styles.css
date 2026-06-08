@@ -1,0 +1,13 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html { scroll-behavior: smooth; }
+
+.drag-over {
+  @apply border-primary bg-blue-50 scale-105;
+}
+
+.confidence-high   { @apply bg-green-100 text-green-800; }
+.confidence-medium { @apply bg-orange-100 text-orange-800; }
+.confidence-low    { @apply bg-red-100 text-red-800; }

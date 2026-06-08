@@ -1,0 +1,104 @@
+<div class="min-h-screen bg-slate-50 p-6 md:p-12">
+  <div class="max-w-4xl mx-auto">
+
+    <!-- Header -->
+    <div class="flex items-center justify-between mb-10">
+      <div>
+        <h1 class="text-3xl font-bold text-slate-800">Processing History</h1>
+        <p class="text-slate-500 mt-1">All documents analysed by Azure AI Document Intelligence</p>
+      </div>
+      <a routerLink="/upload"
+         class="bg-primary text-white px-6 py-3 rounded-xl font-bold uppercase tracking-widest text-sm hover:bg-blue-700 transition-all active:scale-95 shadow-md">
+        + New Upload
+      </a>
+    </div>
+
+    <!-- Loading -->
+    @if (isLoading()) {
+      <div class="flex flex-col items-center justify-center py-24 text-slate-400">
+        <div class="animate-spin rounded-full h-10 w-10 border-b-2 border-primary mb-4"></div>
+        <p class="uppercase tracking-widest text-sm">Loading results...</p>
+      </div>
+    }
+
+    <!-- Error -->
+    @if (errorMessage()) {
+      <div class="p-4 bg-red-50 border border-red-200 rounded-xl text-red-600 text-sm mb-6">
+        ⚠️ {{ errorMessage() }}
+      </div>
+    }
+
+    <!-- Empty state -->
+    @if (!isLoading() && results().length === 0 && !errorMessage()) {
+      <div class="flex flex-col items-center justify-center py-24 text-slate-400">
+        <span class="text-6xl mb-4">📭</span>
+        <p class="font-semibold text-slate-500 text-lg">No documents yet</p>
+        <p class="text-sm mt-1">Upload your first document to see results here</p>
+        <a routerLink="/upload"
+           class="mt-6 text-primary font-semibold hover:underline">
+          Upload a document →
+        </a>
+      </div>
+    }
+
+    <!-- Results list -->
+    @if (!isLoading() && results().length > 0) {
+      <div class="flex flex-col gap-4">
+        @for (result of results(); track result.id) {
+          <div
+            (click)="result.status === 'completed' && viewResult(result.id)"
+            class="bg-white rounded-2xl border border-slate-200 p-6 transition-all"
+            [class.cursor-pointer]="result.status === 'completed'"
+            [class.hover:shadow-md]="result.status === 'completed'"
+            [class.hover:border-primary]="result.status === 'completed'"
+            [class.opacity-75]="result.status === 'failed'">
+
+            <div class="flex items-start justify-between gap-4">
+
+              <!-- Left: icon + details -->
+              <div class="flex items-start gap-4">
+                <span class="text-3xl mt-1">
+                  {{ documentConfig(result.documentType).icon }}
+                </span>
+                <div>
+                  <p class="font-semibold text-slate-800">{{ result.fileName }}</p>
+                  <p class="text-slate-400 text-sm mt-0.5">
+                    {{ documentConfig(result.documentType).label }}
+                    · {{ formatDate(result.processedAt) }}
+                  </p>
+                  @if (result.status === 'completed') {
+                    <p class="text-slate-500 text-xs mt-1">
+                      {{ getFieldCount(result.fields) }} fields extracted
+                      · {{ result.pageCount }} page{{ result.pageCount !== 1 ? 's' : '' }}
+                    </p>
+                  }
+                  @if (result.status === 'failed' && result.error) {
+                    <p class="text-red-400 text-xs mt-1">{{ result.error }}</p>
+                  }
+                </div>
+              </div>
+
+              <!-- Right: status + confidence -->
+              <div class="flex flex-col items-end gap-2 shrink-0">
+                <span class="px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wider"
+                      [class]="getStatusClass(result.status)">
+                  {{ result.status }}
+                </span>
+
+                @if (result.status === 'completed') {
+                  <span class="text-xs font-semibold px-2 py-1 rounded-full"
+                        [class]="getConfidenceClass(getConfidenceAverage(result))">
+                    {{ getConfidenceAverage(result) }}% avg confidence
+                  </span>
+                  <span class="text-xs text-primary font-semibold">View details →</span>
+                }
+              </div>
+
+            </div>
+          </div>
+        }
+      </div>
+    }
+
+  </div>
+</div>

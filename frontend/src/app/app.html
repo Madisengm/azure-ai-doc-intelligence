@@ -1,0 +1,22 @@
+<nav class="fixed top-0 w-full z-50 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between">
+  <div class="flex items-center gap-2">
+    <span class="text-xl">🧠</span>
+    <span class="font-bold text-slate-800 tracking-tight">Azure Doc Intelligence</span>
+  </div>
+  <div class="flex gap-6">
+    <a routerLink="/upload"
+       routerLinkActive="text-primary font-semibold"
+       class="text-slate-500 hover:text-primary uppercase text-sm tracking-widest transition-colors">
+      Upload
+    </a>
+    <a routerLink="/history"
+       routerLinkActive="text-primary font-semibold"
+       class="text-slate-500 hover:text-primary uppercase text-sm tracking-widest transition-colors">
+      History
+    </a>
+  </div>
+</nav>
+
+<main class="pt-20">
+  <router-outlet />
+</main>
