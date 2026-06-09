@@ -29,14 +29,13 @@ jobs:
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
 
-      - name: Install frontend dependencies
-        run: npm ci
-        working-directory: frontend
-
+      # FIX: removed separate npm ci step — let the action install from the
+      # correct working-directory so cypress module resolves properly
       - name: Start Angular app and run Cypress
         uses: cypress-io/github-action@v6
         with:
           working-directory: frontend
+          install-command: npm ci
           start: npx ng serve --configuration development
           wait-on: 'http://localhost:4200'
           wait-on-timeout: 60
@@ -56,7 +55,7 @@ jobs:
   build_and_deploy_job:
     name: Build and Deploy Job
     runs-on: ubuntu-latest
-    needs: cypress   # ← blocks deploy if any Cypress test fails
+    needs: cypress
     if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.action != 'closed')
     steps:
       - uses: actions/checkout@v4
@@ -78,7 +77,7 @@ jobs:
   smoke_test:
     name: Live Site Smoke Test
     runs-on: ubuntu-latest
-    needs: build_and_deploy_job  # ← only runs after successful deploy
+    needs: build_and_deploy_job
     if: github.event_name == 'push'
     steps:
       - name: Checkout repo
@@ -91,19 +90,15 @@ jobs:
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
 
-      - name: Install frontend dependencies
-        run: npm ci
-        working-directory: frontend
-
       - name: Run smoke tests against live site
         uses: cypress-io/github-action@v6
         with:
           working-directory: frontend
+          install-command: npm ci
           spec: |
             cypress/e2e/upload.cy.ts
             cypress/e2e/history.cy.ts
         env:
-          # Points at the real deployed site instead of localhost
           CYPRESS_baseUrl: https://salmon-wave-012e1d61e.7.azurestaticapps.net
 
       - name: Upload smoke test screenshots on failure
