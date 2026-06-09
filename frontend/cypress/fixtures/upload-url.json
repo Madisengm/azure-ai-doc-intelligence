@@ -1,0 +1,6 @@
+
+{
+  "sasUrl": "https://aidintelstorage.blob.core.windows.net/documents/cv/1234-test-cv.pdf?sv=2026&sp=cw&sig=fake",
+  "blobName": "cv/1234-test-cv.pdf",
+  "documentType": "cv"
+}

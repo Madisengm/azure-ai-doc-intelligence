@@ -1,0 +1,15 @@
+{
+  "id": "test-uuid-001",
+  "blobName": "cv/1234-test-cv.pdf",
+  "documentType": "cv",
+  "fileName": "test-cv.pdf",
+  "processedAt": "2026-06-05T11:32:16Z",
+  "status": "completed",
+  "pageCount": 1,
+  "fields": {
+    "Name": { "value": "Mahlatse Madiseng", "confidence": 0.95 },
+    "Email": { "value": "mahlatse@example.com", "confidence": 0.92 },
+    "Phone": { "value": "+27 11 000 0000", "confidence": 0.88 },
+    "Skills": { "value": "Angular, TypeScript, Azure", "confidence": 0.85 }
+  }
+}
