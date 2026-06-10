@@ -71,47 +71,46 @@ jobs:
           api_location: "api"
           output_location: "dist/frontend/browser"
 
-# ─── Job 3: Smoke test against live site ──────────────────────────────────
-smoke_test:
-  name: Live Site Smoke Test
-  runs-on: ubuntu-latest
-  needs: build_and_deploy_job
-  if: github.event_name == 'push'
-  steps:
-    - name: Checkout repo
-      uses: actions/checkout@v4
+  # ─── Job 3: Smoke test against live site ──────────────────────────────────
+  smoke_test:
+    name: Live Site Smoke Test
+    runs-on: ubuntu-latest
+    needs: build_and_deploy_job
+    if: github.event_name == 'push'
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
 
-    - name: Set up Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: 24
-        cache: 'npm'
-        cache-dependency-path: frontend/package-lock.json
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
 
-    - name: Install frontend dependencies
-      run: npm ci
-      working-directory: frontend
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: frontend
 
-    # Wait for deployment to propagate before smoke testing
-    - name: Wait for live site to be ready
-      run: |
-        echo "Waiting for deployment to propagate..."
-        timeout 120 bash -c 'until curl -sf https://salmon-wave-012e1d61e.7.azurestaticapps.net > /dev/null; do sleep 5; done'
-        echo "Live site is ready!"
+      - name: Wait for live site to be ready
+        run: |
+          echo "Waiting for deployment to propagate..."
+          timeout 120 bash -c 'until curl -sf https://salmon-wave-012e1d61e.7.azurestaticapps.net > /dev/null; do sleep 5; done'
+          echo "Live site is ready!"
 
-    - name: Run smoke tests against live site
-      run: npx cypress run --browser chrome --spec "cypress/e2e/upload.cy.ts,cypress/e2e/history.cy.ts"
-      working-directory: frontend
-      env:
-        CYPRESS_baseUrl: https://salmon-wave-012e1d61e.7.azurestaticapps.net
+      - name: Run smoke tests against live site
+        run: npx cypress run --browser chrome --spec "cypress/e2e/upload.cy.ts,cypress/e2e/history.cy.ts"
+        working-directory: frontend
+        env:
+          CYPRESS_baseUrl: https://salmon-wave-012e1d61e.7.azurestaticapps.net
 
-    - name: Upload smoke test screenshots on failure
-      uses: actions/upload-artifact@v4
-      if: failure()
-      with:
-        name: smoke-test-screenshots
-        path: frontend/cypress/screenshots
-        if-no-files-found: ignore
+      - name: Upload smoke test screenshots on failure
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: smoke-test-screenshots
+          path: frontend/cypress/screenshots
+          if-no-files-found: ignore
 
   # ─── Job 4: Close PR environment ──────────────────────────────────────────
   close_pull_request_job:
