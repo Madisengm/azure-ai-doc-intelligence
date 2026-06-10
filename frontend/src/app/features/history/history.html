@@ -5,7 +5,25 @@
     <div class="flex items-center justify-between mb-10">
       <div>
         <h1 class="text-3xl font-bold text-slate-800">Processing History</h1>
-        <p class="text-slate-500 mt-1">All documents analysed by Azure AI Document Intelligence</p>
+        <div class="flex items-center gap-2 mt-1">
+          <p class="text-slate-500">All documents analysed by Azure AI Document Intelligence</p>
+
+          <!-- SignalR connection indicator -->
+          @if (isConnected()) {
+            <span class="flex items-center gap-1 text-xs text-green-600 font-medium">
+              <span class="relative flex h-2 w-2">
+                <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-500 opacity-75"></span>
+                <span class="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+              </span>
+              Live
+            </span>
+          } @else {
+            <span class="flex items-center gap-1 text-xs text-slate-400 font-medium">
+              <span class="h-2 w-2 rounded-full bg-slate-300"></span>
+              Connecting...
+            </span>
+          }
+        </div>
       </div>
       <a routerLink="/upload"
          class="bg-primary text-white px-6 py-3 rounded-xl font-bold uppercase tracking-widest text-sm hover:bg-blue-700 transition-all active:scale-95 shadow-md">
@@ -58,17 +76,17 @@
               <!-- Left: icon + details -->
               <div class="flex items-start gap-4">
                 <span class="text-3xl mt-1">
-                  {{ documentConfig(result.documentType).icon }}
+                  {{ config[result.documentType].icon }}
                 </span>
                 <div>
                   <p class="font-semibold text-slate-800">{{ result.fileName }}</p>
                   <p class="text-slate-400 text-sm mt-0.5">
-                    {{ documentConfig(result.documentType).label }}
+                    {{ config[result.documentType].label }}
                     · {{ formatDate(result.processedAt) }}
                   </p>
                   @if (result.status === 'completed') {
                     <p class="text-slate-500 text-xs mt-1">
-                      {{ getFieldCount(result.fields) }} fields extracted
+                      {{ Object.keys(result.fields).length }} fields extracted
                       · {{ result.pageCount }} page{{ result.pageCount !== 1 ? 's' : '' }}
                     </p>
                   }

@@ -1,7 +1,9 @@
 import { Component, inject, signal, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router, RouterModule } from '@angular/router';
-import { ApiService } from '../../core/services/api-service';
+import { Subscription } from 'rxjs';
+import { ApiService } from '../../core/services/api-service'; 
+import { SignalRService } from '../../core/services/signalr';
 import { ExtractionResult, DOCUMENT_TYPE_CONFIG } from '../../core/models/document';
 
 @Component({
@@ -11,31 +13,41 @@ import { ExtractionResult, DOCUMENT_TYPE_CONFIG } from '../../core/models/docume
   templateUrl: './history.html',
 })
 export class History implements OnInit, OnDestroy {
-  private apiService = inject(ApiService);
-  private router     = inject(Router);
+  private apiService    = inject(ApiService);
+  private signalRService = inject(SignalRService);
+  private router        = inject(Router);
 
-  results     = signal<ExtractionResult[]>([]);
-  isLoading   = signal<boolean>(true);
-  errorMessage = signal<string>('');
+  results       = signal<ExtractionResult[]>([]);
+  isLoading     = signal<boolean>(true);
+  errorMessage  = signal<string>('');
+  isConnected   = signal<boolean>(false);
 
-  private pollInterval?: ReturnType<typeof setInterval>;
-
+  readonly Object = Object;
   readonly config = DOCUMENT_TYPE_CONFIG;
 
-  ngOnInit(): void {
+  private signalRSub?: Subscription;
+  private stateSub?:   Subscription;
+
+  async ngOnInit(): Promise<void> {
     this.loadResults();
-    this.pollInterval = setInterval(() => {
-      const hasProcessing = this.results().some(r => r.status === 'processing');
-      if (hasProcessing) this.loadResults();
-    }, 3000);
+
+    await this.signalRService.connect();
+
+    this.stateSub = this.signalRService.onConnectionState.subscribe(state => {
+      this.isConnected.set(state.connected);
+    });
+
+    this.signalRSub = this.signalRService.onDocumentProcessed.subscribe(result => {
+      this.upsertResult(result);
+    });
+
+    this.isConnected.set(this.signalRService.isConnected);
   }
 
   ngOnDestroy(): void {
-    clearInterval(this.pollInterval);
-  }
-
-  documentConfig(type: string) {
-    return this.config[type as keyof typeof this.config];
+    this.signalRSub?.unsubscribe();
+    this.stateSub?.unsubscribe();
+    this.signalRService.disconnect();
   }
 
   loadResults(): void {
@@ -50,6 +62,19 @@ export class History implements OnInit, OnDestroy {
         console.error('getAllResults error:', err);
       },
     });
+  }
+
+  private upsertResult(incoming: ExtractionResult): void {
+    const current = this.results();
+    const index   = current.findIndex(r => r.id === incoming.id);
+
+    if (index !== -1) {
+      const updated = [...current];
+      updated[index] = incoming;
+      this.results.set(updated);
+    } else {
+      this.results.set([incoming, ...current]);
+    }
   }
 
   viewResult(id: string): void {
@@ -76,12 +101,6 @@ export class History implements OnInit, OnDestroy {
       failed:     'bg-red-100 text-red-700',
     };
     return map[status] ?? 'bg-slate-100 text-slate-600';
-  }
-
-  getFieldCount(
-    fields: Record<string, unknown>
-  ): number {
-    return Object.keys(fields ?? {}).length;
   }
 
   formatDate(iso: string): string {

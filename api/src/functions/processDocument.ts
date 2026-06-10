@@ -1,4 +1,4 @@
-import { app, HttpRequest, HttpResponseInit, InvocationContext } from "@azure/functions";
+import { app, HttpRequest, HttpResponseInit, InvocationContext, output } from "@azure/functions";
 import { BlobService } from "../services/blobService";
 import { CosmosService } from "../services/cosmosService";
 import { DocumentIntelligenceService } from "../services/documentIntelligenceService";
@@ -8,6 +8,13 @@ import { randomUUID } from "crypto";
 const blobService   = new BlobService();
 const cosmosService = new CosmosService();
 const aiService     = new DocumentIntelligenceService();
+
+const signalROutput = output.generic({
+    type:                    'signalR',
+    name:                    'signalRMessages',
+    hubName:                 'docIntelligence',
+    connectionStringSetting: 'AZURE_SIGNALR_CONNECTION_STRING',
+});
 
 const ALLOWED_ORIGINS = [
     "http://localhost:4200",
@@ -24,8 +31,8 @@ export async function processDocument(
     const allowedOrigin = ALLOWED_ORIGINS.indexOf(origin) !== -1 ? origin : ALLOWED_ORIGINS[0];
 
     const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": allowedOrigin,
+        "Content-Type":                 "application/json",
+        "Access-Control-Allow-Origin":  allowedOrigin,
         "Access-Control-Allow-Methods": "POST, OPTIONS",
         "Access-Control-Allow-Headers": "Content-Type",
     };
@@ -36,7 +43,7 @@ export async function processDocument(
 
     try {
         const body = await request.json() as {
-            blobName: string;
+            blobName:     string;
             documentType: string;
         };
 
@@ -55,22 +62,25 @@ export async function processDocument(
         const resultId    = randomUUID();
 
         const processingRecord: ExtractionResult = {
-            id:          resultId,
+            id:           resultId,
             blobName,
             documentType: documentType as any,
             fileName,
-            processedAt: new Date().toISOString(),
-            status:      'processing',
-            fields:      {},
-            pageCount:   0,
+            processedAt:  new Date().toISOString(),
+            status:       'processing',
+            fields:       {},
+            pageCount:    0,
         };
 
         await cosmosService.saveResult(processingRecord);
         context.log(`Processing record saved: ${resultId}`);
 
-        const buffer    = await blobService.downloadBlob(blobName);
-        context.log(`Blob downloaded: ${blobName}`);
+        context.extraOutputs.set(signalROutput, {
+            target:    'documentProcessed',
+            arguments: [processingRecord],
+        });
 
+        const buffer    = await blobService.downloadBlob(blobName);
         const extraction = await aiService.analyseDocument(buffer, documentType);
         context.log(`Extraction complete. Fields: ${Object.keys(extraction.fields).length}`);
 
@@ -84,8 +94,13 @@ export async function processDocument(
         await cosmosService.saveResult(completedRecord);
         context.log(`Completed result saved: ${resultId}`);
 
+        context.extraOutputs.set(signalROutput, {
+            target:    'documentProcessed',
+            arguments: [completedRecord],
+        });
+
         return {
-            status: 200,
+            status:   200,
             headers,
             jsonBody: { id: resultId, status: 'completed' }
         };
@@ -93,7 +108,7 @@ export async function processDocument(
     } catch (error: any) {
         context.error("processDocument error:", error);
         return {
-            status: 500,
+            status:   500,
             headers,
             jsonBody: { error: error?.message ?? "Processing failed" }
         };
@@ -101,7 +116,8 @@ export async function processDocument(
 }
 
 app.http("process-document", {
-    methods: ["POST", "OPTIONS"],
-    authLevel: "anonymous",
-    handler: processDocument,
+    methods:      ["POST", "OPTIONS"],
+    authLevel:    "anonymous",
+    extraOutputs: [signalROutput],
+    handler:      processDocument,
 });
