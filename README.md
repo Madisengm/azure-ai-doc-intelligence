@@ -9,7 +9,7 @@
 [![Azure AI](https://img.shields.io/badge/Azure_AI-Document_Intelligence-0078D4?logo=microsoftazure&logoColor=white)](https://learn.microsoft.com/en-us/azure/ai-services/document-intelligence)
 [![TailwindCSS](https://img.shields.io/badge/TailwindCSS-3.x-06B6D4?logo=tailwindcss&logoColor=white)](https://tailwindcss.com)
 
-> Upload any document — CV, invoice, receipt, certificate, or ID — and have Azure AI extract structured data from it in real time. Built as a cloud portfolio project targeting the AZ-204 Azure Developer Associate certification.
+> Upload any document — CV, invoice, receipt, certificate, or ID — and have Azure AI extract structured data from it in real time. Built as a cloud portfolio project targeting the AI-200 Azure AI Cloud Developer Associate certification.
 
 **Live site:** [https://salmon-wave-012e1d61e.7.azurestaticapps.net](https://salmon-wave-012e1d61e.7.azurestaticapps.net)
 

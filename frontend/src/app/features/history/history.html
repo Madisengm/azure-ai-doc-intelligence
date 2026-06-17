@@ -31,6 +31,73 @@
       </a>
     </div>
 
+    <!-- Semantic search bar -->
+    <div class="mb-8">
+      <div class="flex gap-3">
+        <input
+          type="text"
+          [value]="searchQuery()"
+          (input)="searchQuery.set($any($event.target).value)"
+          (keydown.enter)="search()"
+          placeholder="Search documents semantically e.g. 'Angular developer Johannesburg'..."
+          class="flex-1 px-4 py-3 rounded-xl border-2 border-slate-200 focus:border-primary focus:outline-none text-sm text-slate-700 placeholder:text-slate-400 transition-colors" />
+
+        <button
+          (click)="search()"
+          [disabled]="!searchQuery().trim() || isSearching()"
+          class="bg-primary text-white px-6 py-3 rounded-xl font-bold text-sm uppercase tracking-widest hover:bg-blue-700 transition-all active:scale-95 disabled:opacity-40 disabled:pointer-events-none">
+          @if (isSearching()) { Searching... } @else { Search }
+        </button>
+
+        @if (hasSearched()) {
+          <button
+            (click)="clearSearch()"
+            class="px-4 py-3 border-2 border-slate-200 rounded-xl text-slate-400 font-bold text-sm hover:border-slate-400 transition-all">
+            Clear
+          </button>
+        }
+      </div>
+
+      <!-- Search results -->
+      @if (hasSearched()) {
+        <div class="mt-4">
+          <p class="text-xs text-slate-400 uppercase tracking-widest mb-3">
+            {{ searchResults().length }} semantic search result{{ searchResults().length !== 1 ? 's' : '' }}
+          </p>
+          @if (searchResults().length > 0) {
+            <div class="flex flex-col gap-3">
+              @for (doc of searchResults(); track doc.id) {
+                <div
+                  (click)="viewResult(doc.id)"
+                  class="bg-white rounded-xl border border-primary/30 p-4 cursor-pointer hover:border-primary hover:shadow-md transition-all">
+                  <div class="flex items-center justify-between gap-4">
+                    <div class="flex items-center gap-3">
+                      <span class="text-2xl">{{ config[doc.documentType].icon }}</span>
+                      <div>
+                        <p class="font-semibold text-slate-800 text-sm">{{ doc.fileName }}</p>
+                        <p class="text-slate-400 text-xs mt-0.5">
+                          {{ config[doc.documentType].label }} · {{ formatDate(doc.processedAt) }}
+                        </p>
+                      </div>
+                    </div>
+                    @if (doc.similarityScore !== undefined) {
+                      <span class="shrink-0 px-2 py-1 rounded-full text-xs font-bold bg-blue-100 text-blue-700">
+                        {{ getSimilarityPercent(doc.similarityScore) }}% match
+                      </span>
+                    }
+                  </div>
+                </div>
+              }
+            </div>
+          } @else if (!isSearching()) {
+            <div class="bg-white rounded-xl border border-dashed border-slate-300 p-6 text-center text-slate-400 text-sm">
+              No documents matched your search
+            </div>
+          }
+        </div>
+      }
+    </div>
+
     <!-- Loading -->
     @if (isLoading()) {
       <div class="flex flex-col items-center justify-center py-24 text-slate-400">

@@ -15,12 +15,15 @@ export class Result implements OnInit {
   private route      = inject(ActivatedRoute);
   private router     = inject(Router);
 
-  result      = signal<ExtractionResult | null>(null);
-  isLoading   = signal<boolean>(true);
-  showRawJson = signal<boolean>(false);
-  errorMessage = signal<string>('');
+  result        = signal<ExtractionResult | null>(null);
+  similarDocs   = signal<ExtractionResult[]>([]);
+  isLoading     = signal<boolean>(true);
+  isFindingSimilar = signal<boolean>(false);
+  showRawJson   = signal<boolean>(false);
+  errorMessage  = signal<string>('');
 
   readonly config = DOCUMENT_TYPE_CONFIG;
+  readonly Object = Object;
 
   ngOnInit(): void {
     const id = this.route.snapshot.params['id'];
@@ -34,22 +37,39 @@ export class Result implements OnInit {
         this.result.set(data);
         this.isLoading.set(false);
       },
-      error: (err) => {
+      error: () => {
         this.errorMessage.set('Result not found or failed to load.');
         this.isLoading.set(false);
-        console.error('getResultById error:', err);
       },
     });
   }
 
-  documentConfig(type: string) {
-    return this.config[type as keyof typeof this.config];
+  findSimilar(): void {
+    const id = this.result()?.id;
+    if (!id) return;
+
+    this.isFindingSimilar.set(true);
+    this.similarDocs.set([]);
+
+    this.apiService.findSimilar(id).subscribe({
+      next: (docs) => {
+        this.similarDocs.set(docs);
+        this.isFindingSimilar.set(false);
+      },
+      error: () => {
+        this.isFindingSimilar.set(false);
+      },
+    });
   }
 
-  getFieldCount(
-    fields: Record<string, unknown>
-  ): number {
-    return Object.keys(fields ?? {}).length;
+  viewSimilar(id: string): void {
+    this.router.navigate(['/result', id]);
+    this.similarDocs.set([]);
+  }
+
+  getSimilarityPercent(score: number | undefined): number {
+    if (score === undefined) return 0;
+    return Math.round((1 - score / 2) * 100);
   }
 
   getConfidenceClass(confidence: number): string {
@@ -70,7 +90,8 @@ export class Result implements OnInit {
   }
 
   get rawJson(): string {
-    return JSON.stringify(this.result(), null, 2);
+    const { embedding, ...rest } = this.result() as any;
+    return JSON.stringify(rest, null, 2);
   }
 
   formatDate(iso: string): string {

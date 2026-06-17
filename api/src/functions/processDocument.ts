@@ -4,10 +4,12 @@ import { CosmosService } from "../services/cosmosService";
 import { DocumentIntelligenceService } from "../services/documentIntelligenceService";
 import { ExtractionResult } from "../services/cosmosService";
 import { randomUUID } from "crypto";
+import { extractEmbeddingText } from "../services/fieldExtractor";
+import { generateEmbedding } from "../services/embeddingService";
 
-const blobService   = new BlobService();
-const cosmosService = new CosmosService();
-const aiService     = new DocumentIntelligenceService();
+const blobService    = new BlobService();
+const cosmosService  = new CosmosService();
+const aiService      = new DocumentIntelligenceService();
 
 const signalROutput = output.generic({
     type:                    'signalR',
@@ -61,6 +63,7 @@ export async function processDocument(
         const fileName    = fileSegment.replace(/^\d+-/, '');
         const resultId    = randomUUID();
 
+        // ── 1. Save processing record immediately ─────────────────────────
         const processingRecord: ExtractionResult = {
             id:           resultId,
             blobName,
@@ -75,20 +78,28 @@ export async function processDocument(
         await cosmosService.saveResult(processingRecord);
         context.log(`Processing record saved: ${resultId}`);
 
-        context.extraOutputs.set(signalROutput, {
-            target:    'documentProcessed',
-            arguments: [processingRecord],
-        });
-
-        const buffer    = await blobService.downloadBlob(blobName);
+        // ── 2. Run AI extraction ──────────────────────────────────────────
+        const buffer     = await blobService.downloadBlob(blobName);
         const extraction = await aiService.analyseDocument(buffer, documentType);
         context.log(`Extraction complete. Fields: ${Object.keys(extraction.fields).length}`);
 
+        // ── 3. Generate embedding from high-value fields ──────────────────
+        const embeddingText = extractEmbeddingText({
+            ...processingRecord,
+            fields: extraction.fields,
+        });
+
+        context.log(`Generating embedding for: "${embeddingText.substring(0, 80)}..."`);
+        const embedding = await generateEmbedding(embeddingText);
+        context.log(`Embedding generated: ${embedding.length} dimensions`);
+
+        // ── 4. Save completed record with embedding ───────────────────────
         const completedRecord: ExtractionResult = {
             ...processingRecord,
             status:    'completed',
             fields:    extraction.fields,
             pageCount: extraction.pageCount,
+            embedding,
         };
 
         await cosmosService.saveResult(completedRecord);
@@ -96,7 +107,16 @@ export async function processDocument(
 
         context.extraOutputs.set(signalROutput, {
             target:    'documentProcessed',
-            arguments: [completedRecord],
+            arguments: [{
+                id:           completedRecord.id,
+                blobName:     completedRecord.blobName,
+                documentType: completedRecord.documentType,
+                fileName:     completedRecord.fileName,
+                processedAt:  completedRecord.processedAt,
+                status:       completedRecord.status,
+                fields:       completedRecord.fields,
+                pageCount:    completedRecord.pageCount,
+            }],
         });
 
         return {

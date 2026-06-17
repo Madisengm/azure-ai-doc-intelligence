@@ -1,18 +1,16 @@
 import { CosmosClient, Container } from "@azure/cosmos";
 
 export interface ExtractionResult {
-    id: string;
-    blobName: string;
+    id:           string;
+    blobName:     string;
     documentType: string;
-    fileName: string;
-    processedAt: string;
-    status: 'processing' | 'completed' | 'failed';
-    fields: Record<string, {
-        value: string | null;
-        confidence: number;
-    }>;
-    pageCount: number;
-    error?: string;
+    fileName:     string;
+    processedAt:  string;
+    status:       'processing' | 'completed' | 'failed';
+    fields:       Record<string, { value: string | null; confidence: number }>;
+    pageCount:    number;
+    error?:       string;
+    embedding?:   number[];
 }
 
 export class CosmosService {
@@ -51,9 +49,40 @@ export class CosmosService {
     async getAllResults(): Promise<ExtractionResult[]> {
         const { resources } = await this.container.items
             .query<ExtractionResult>(
-                "SELECT * FROM c ORDER BY c.processedAt DESC"
+                "SELECT c.id, c.blobName, c.documentType, c.fileName, c.processedAt, c.status, c.fields, c.pageCount, c.error FROM c ORDER BY c.processedAt DESC"
             )
             .fetchAll();
+        return resources;
+    }
+
+    async vectorSearch(
+        embedding: number[],
+        excludeId: string,
+        topK: number = 5
+    ): Promise<ExtractionResult[]> {
+        const query = {
+            query: `
+                SELECT TOP @topK
+                    c.id, c.blobName, c.documentType, c.fileName,
+                    c.processedAt, c.status, c.fields, c.pageCount,
+                    VectorDistance(c.embedding, @embedding) AS similarityScore
+                FROM c
+                WHERE c.id != @excludeId
+                AND c.status = 'completed'
+                AND IS_ARRAY(c.embedding)
+                ORDER BY VectorDistance(c.embedding, @embedding)
+            `,
+            parameters: [
+                { name: '@embedding', value: embedding },
+                { name: '@excludeId', value: excludeId },
+                { name: '@topK',      value: topK },
+            ],
+        };
+
+        const { resources } = await this.container.items
+            .query<ExtractionResult & { similarityScore: number }>(query)
+            .fetchAll();
+
         return resources;
     }
 }

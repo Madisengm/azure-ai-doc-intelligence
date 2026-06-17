@@ -16,6 +16,8 @@ export interface ExtractionResult {
   fields: Record<string, ExtractedField>;
   pageCount: number;
   error?: string;
+  embedding?: number[];
+  similarityScore?: number; 
 }
 
 export interface UploadUrlRequest {

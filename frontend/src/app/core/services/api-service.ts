@@ -32,4 +32,16 @@ export class ApiService {
       { blobName, documentType }
     );
   }
+
+  findSimilar(id: string): Observable<ExtractionResult[]> {
+    return this.http
+      .get<{ results: ExtractionResult[] }>(`${this.base}/find-similar/${id}`)
+      .pipe(map(res => res.results));
+  }
+
+  searchDocuments(query: string): Observable<ExtractionResult[]> {
+    return this.http
+      .post<{ results: ExtractionResult[] }>(`${this.base}/search-documents`, { query })
+      .pipe(map(res => res.results));
+  }
 }
