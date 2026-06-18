@@ -9,7 +9,7 @@ describe('Result page', () => {
     cy.wait('@getResult');
   });
 
-  // ─── Rendering ────────────────────────────────────────────────────────────
+  // ─── Page rendering ────────────────────────────────────────────────────────
 
   describe('Page rendering', () => {
     it('renders the file name', () => {
@@ -33,7 +33,7 @@ describe('Result page', () => {
     });
   });
 
-  // ─── Extracted fields ─────────────────────────────────────────────────────
+  // ─── Extracted fields ──────────────────────────────────────────────────────
 
   describe('Extracted fields', () => {
     it('renders the Extracted Fields heading', () => {
@@ -57,7 +57,7 @@ describe('Result page', () => {
     });
   });
 
-  // ─── Raw JSON toggle ──────────────────────────────────────────────────────
+  // ─── Raw JSON toggle ───────────────────────────────────────────────────────
 
   describe('Raw JSON toggle', () => {
     it('raw JSON is hidden by default', () => {
@@ -74,6 +74,60 @@ describe('Result page', () => {
       cy.get('pre').should('be.visible');
       cy.contains('Hide Raw JSON').click();
       cy.get('pre').should('not.exist');
+    });
+  });
+
+  // ─── Find Similar ──────────────────────────────────────────────────────────
+
+  describe('Find Similar', () => {
+    it('renders the Similar Documents section', () => {
+      cy.contains('Similar Documents').should('be.visible');
+    });
+
+    it('renders the Find Similar button', () => {
+      cy.contains('Find Similar').should('be.visible');
+    });
+
+    it('renders placeholder text before search', () => {
+      cy.contains('vector similarity search').should('be.visible');
+    });
+
+    it('shows similar documents after clicking Find Similar', () => {
+      cy.intercept('GET', '/api/find-similar/test-uuid-001', {
+        fixture: 'similar-results.json'
+      }).as('findSimilar');
+
+      cy.contains('Find Similar').click();
+      cy.wait('@findSimilar');
+
+      cy.contains('test-cv-2.pdf').should('be.visible');
+      cy.contains('test-cv-3.pdf').should('be.visible');
+    });
+
+    it('shows similarity percentage on similar results', () => {
+      cy.intercept('GET', '/api/find-similar/test-uuid-001', {
+        fixture: 'similar-results.json'
+      }).as('findSimilar');
+
+      cy.contains('Find Similar').click();
+      cy.wait('@findSimilar');
+
+      cy.contains('% match').should('be.visible');
+    });
+
+    it('navigates to similar result when clicked', () => {
+      cy.intercept('GET', '/api/find-similar/test-uuid-001', {
+        fixture: 'similar-results.json'
+      }).as('findSimilar');
+
+      cy.intercept('GET', '/api/results/test-uuid-003', {
+        fixture: 'extraction-result.json'
+      }).as('getResult2');
+
+      cy.contains('Find Similar').click();
+      cy.wait('@findSimilar');
+      cy.contains('test-cv-2.pdf').click();
+      cy.url().should('include', '/result/test-uuid-003');
     });
   });
 

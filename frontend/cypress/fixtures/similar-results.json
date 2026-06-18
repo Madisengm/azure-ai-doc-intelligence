@@ -1,0 +1,31 @@
+{
+  "results": [
+    {
+      "id": "test-uuid-003",
+      "blobName": "cv/5678-test-cv-2.pdf",
+      "documentType": "cv",
+      "fileName": "test-cv-2.pdf",
+      "processedAt": "2026-06-10T09:00:00Z",
+      "status": "completed",
+      "pageCount": 2,
+      "similarityScore": 0.12,
+      "fields": {
+        "Name": { "value": "John Developer", "confidence": 0.91 },
+        "Skills": { "value": "Angular, Azure, TypeScript", "confidence": 0.88 }
+      }
+    },
+    {
+      "id": "test-uuid-004",
+      "blobName": "cv/9999-test-cv-3.pdf",
+      "documentType": "cv",
+      "fileName": "test-cv-3.pdf",
+      "processedAt": "2026-06-09T14:00:00Z",
+      "status": "completed",
+      "pageCount": 1,
+      "similarityScore": 0.31,
+      "fields": {
+        "Name": { "value": "Jane Engineer", "confidence": 0.93 }
+      }
+    }
+  ]
+}
