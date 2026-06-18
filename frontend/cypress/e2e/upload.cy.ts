@@ -106,7 +106,6 @@ describe('Upload page', () => {
 
   describe('Upload flow', () => {
     beforeEach(() => {
-      // Mock all three API calls in the upload pipeline
       cy.intercept('POST', '/api/get-upload-url', {
         fixture: 'upload-url.json'
       }).as('getUploadUrl');
@@ -115,11 +114,6 @@ describe('Upload page', () => {
         statusCode: 201,
         body: '',
       }).as('blobUpload');
-
-      cy.intercept('POST', '/api/process-document', {
-        statusCode: 200,
-        body: { id: 'test-uuid-001', status: 'completed' }
-      }).as('processDocument');
     });
 
     it('shows progress bar during upload', () => {
@@ -149,9 +143,8 @@ describe('Upload page', () => {
 
       cy.wait('@getUploadUrl');
       cy.wait('@blobUpload');
-      cy.wait('@processDocument');
 
-      cy.contains('Upload complete').should('be.visible');
+      cy.contains('Azure Event Grid is triggering processing').should('be.visible');
     });
   });
 
