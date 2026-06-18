@@ -73,46 +73,19 @@ export class UploadService {
                   documentType: urlResponse.documentType,
                 } as UploadProgress;
               }
+              // FIX: blob upload complete — Event Grid takes over from here.
+              // No explicit processDocument call needed.
               return {
-                percent:      100,
-                blobName:     urlResponse.blobName,
-                documentType: urlResponse.documentType,
+                percent:        100,
+                blobName:       urlResponse.blobName,
+                documentType:   urlResponse.documentType,
+                processingDone: true,
               } as UploadProgress;
             })
           ).subscribe({
-            next: progress => {
-              observer.next(progress);
-
-              if (progress.percent === 100 && progress.blobName) {
-                this.apiService.processDocument(
-                  progress.blobName,
-                  progress.documentType!
-                ).subscribe({
-                  next: (result) => {
-                    observer.next({
-                      percent:        100,
-                      blobName:       progress.blobName,
-                      documentType:   progress.documentType,
-                      resultId:       result.id,
-                      processingDone: true,
-                    });
-                    observer.complete();
-                  },
-                  error: (err) => {
-                    console.error('processDocument failed:', err);
-                    observer.next({
-                      percent:        100,
-                      blobName:       progress.blobName,
-                      documentType:   progress.documentType,
-                      processingDone: true,
-                    });
-                    observer.complete();
-                  }
-                });
-              }
-            },
-            error:    err => observer.error(err),
-            complete: ()  => { },
+            next:     progress => observer.next(progress),
+            error:    err      => observer.error(err),
+            complete: ()       => observer.complete(),
           });
         },
         error: err => observer.error(err),
