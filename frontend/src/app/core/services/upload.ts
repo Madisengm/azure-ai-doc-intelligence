@@ -73,8 +73,7 @@ export class UploadService {
                   documentType: urlResponse.documentType,
                 } as UploadProgress;
               }
-              // FIX: blob upload complete — Event Grid takes over from here.
-              // No explicit processDocument call needed.
+
               return {
                 percent:        100,
                 blobName:       urlResponse.blobName,

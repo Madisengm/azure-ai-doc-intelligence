@@ -1,0 +1,26 @@
+{
+  "name": "api",
+  "version": "1.0.0",
+  "description": "",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc -w",
+    "clean": "rimraf dist",
+    "prestart": "npm run clean && npm run build",
+    "start": "npm run build && func start",
+    "test": "echo \"No tests yet...\""
+  },
+  "dependencies": {
+    "@azure/ai-form-recognizer": "^5.1.0",
+    "@azure/cosmos": "^4.9.3",
+    "@azure/functions": "^4.0.0",
+    "@azure/storage-blob": "^12.32.0"
+  },
+  "devDependencies": {
+    "@types/node": "^18.19.130",
+    "azure-functions-core-tools": "^4.x",
+    "rimraf": "^5.0.0",
+    "typescript": "^5.0.0"
+  }
+}
