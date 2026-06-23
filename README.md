@@ -133,6 +133,7 @@ Angular holds a persistent WebSocket connection to Azure SignalR Service via the
 | Secure Azure solutions | SAS token scoping, env var secret management, never committing credentials |
 | Monitor and troubleshoot | Application Insights across Angular, SWA Functions, and standalone Function App |
 | Connect and consume Azure services | Coordinating Blob, Event Grid, Cosmos DB, AI, SignalR, and embeddings in one pipeline |
+| Key Vault + Managed Identity | Secrets Officer role for setup, Secrets User for runtime, Key Vault references in app settings |
 
 ---
 
@@ -235,6 +236,9 @@ The history page holds a persistent WebSocket connection. When the Event Grid Fu
 
 ### Embedding stripped from API responses
 The 384-element float array is stored in Cosmos DB but stripped before returning to Angular. `getAllResults()` maps through `({ embedding, ...rest }) => rest`. This keeps API payloads lean — avoids ~6KB of float data per result on every history page load.
+
+### Key Vault + Managed Identity
+The standalone Function App uses a system-assigned Managed Identity to read secrets from Azure Key Vault at runtime. App settings store Key Vault references (`@Microsoft.KeyVault(SecretUri=...)`) instead of plaintext values — Azure resolves these transparently when the Function starts. The identity is granted `Key Vault Secrets User` role via Azure RBAC. Secret URIs are stored without version identifiers so key rotation is automatic — updating a secret in Key Vault takes effect on the next Function invocation without any redeployment. This eliminates the need to store or rotate credentials manually in app settings.
 
 ---
 
@@ -355,6 +359,7 @@ func azure functionapp publish ai-doc-eventgrid-processor --build local
 | Event Grid Subscription | `doc-blob-created` | BlobCreated → processDocumentEventGrid webhook |
 | Function App | `ai-doc-eventgrid-processor` | Standalone Windows Consumption plan for Event Grid |
 | Static Web Apps | `ai-doc-intelligence` | Frontend + SWA Functions hosting (Free tier) |
+| Key Vault | `ai-doc-keyvault` | Secrets store for Cosmos DB, Storage, AI, and SignalR keys |
 
 ---
 
