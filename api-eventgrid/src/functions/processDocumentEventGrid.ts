@@ -3,10 +3,12 @@ import { BlobService } from "../services/blobService";
 import { CosmosService } from "../services/cosmosService";
 import { DocumentIntelligenceService } from "../services/documentIntelligenceService";
 import { ExtractionResult } from "../services/cosmosService";
+import { generateEmbedding } from "../services/embeddingService";
+import { extractEmbeddingText } from "../services/fieldExtractor";
 import { randomUUID } from "crypto";
 
-let _blobService:   BlobService | null   = null;
-let _cosmosService: CosmosService | null = null;
+let _blobService:   BlobService | null                 = null;
+let _cosmosService: CosmosService | null               = null;
 let _aiService:     DocumentIntelligenceService | null = null;
 
 function getBlobService()   { return _blobService   ??= new BlobService(); }
@@ -88,7 +90,10 @@ export async function processDocumentEventGrid(
 
                 const containerName = process.env["STORAGE_CONTAINER_NAME"] ?? "documents";
                 const urlParts = blobUrl.split(`/${containerName}/`);
-                if (urlParts.length < 2) continue;
+                if (urlParts.length < 2) {
+                    context.log(`Could not extract blob name from URL: ${blobUrl}`);
+                    continue;
+                }
 
                 const blobName     = urlParts[1].split('?')[0];
                 const blobParts    = blobName.split('/');
@@ -96,7 +101,7 @@ export async function processDocumentEventGrid(
                 const fileSegment  = blobParts[1] ?? blobName;
                 const fileName     = fileSegment.replace(/^\d+-/, '');
 
-                context.log(`Processing blob: ${blobName} (type: ${documentType})`);
+                context.log(`Event Grid blob: ${blobName} (type: ${documentType})`);
                 await processBlob(blobName, documentType, fileName, context);
 
             } catch (blobError: any) {
@@ -104,14 +109,18 @@ export async function processDocumentEventGrid(
             }
         }
 
-        return { status: 200, headers, jsonBody: { processed: blobEvents.length } };
+        return {
+            status:   200,
+            headers,
+            jsonBody: { processed: blobEvents.length }
+        };
 
     } catch (error: any) {
         context.error("processDocumentEventGrid error:", error);
         return {
-            status: 200,
+            status:   200,
             headers,
-            jsonBody: { error: error?.message ?? "Event processing failed" }
+            jsonBody: { received: true, error: error?.message }
         };
     }
 }
@@ -122,6 +131,8 @@ async function processBlob(
     fileName: string,
     context: InvocationContext
 ): Promise<void> {
+
+    // ── Idempotency check ─────────────────────────────────────────────────
     const existing = await getCosmosService().findByBlobName(blobName);
     if (existing?.status === 'completed') {
         context.log(`Blob already completed, skipping: ${blobName}`);
@@ -130,6 +141,7 @@ async function processBlob(
 
     const resultId = existing?.id ?? randomUUID();
 
+    // ── 1. Save processing record immediately ─────────────────────────────
     const processingRecord: ExtractionResult = {
         id:           resultId,
         blobName,
@@ -144,25 +156,40 @@ async function processBlob(
     await getCosmosService().saveResult(processingRecord);
     context.log(`Processing record saved: ${resultId}`);
 
+    // Push processing state via SignalR so Angular shows the loading indicator
     context.extraOutputs.set(signalROutput, {
         target:    'documentProcessed',
         arguments: [processingRecord],
     });
 
+    // ── 2. Download blob and run AI extraction ────────────────────────────
     const buffer     = await getBlobService().downloadBlob(blobName);
     const extraction = await getAiService().analyseDocument(buffer, documentType);
     context.log(`Extraction complete. Fields: ${Object.keys(extraction.fields).length}`);
 
+    // ── 3. Generate embedding from high-value fields ──────────────────────
+    const embeddingText = extractEmbeddingText({
+        ...processingRecord,
+        fields: extraction.fields,
+    });
+
+    context.log(`Generating embedding for: "${embeddingText.substring(0, 80)}..."`);
+    const embedding = await generateEmbedding(embeddingText);
+    context.log(`Embedding generated: ${embedding.length} dimensions`);
+
+    // ── 4. Save completed record with embedding ───────────────────────────
     const completedRecord: ExtractionResult = {
         ...processingRecord,
         status:    'completed',
         fields:    extraction.fields,
         pageCount: extraction.pageCount,
+        embedding, 
     };
 
     await getCosmosService().saveResult(completedRecord);
     context.log(`Completed result saved: ${resultId}`);
 
+    // ── 5. Push completed result via SignalR ──────────────────────────────
     context.extraOutputs.set(signalROutput, {
         target:    'documentProcessed',
         arguments: [{

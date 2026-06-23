@@ -111,7 +111,7 @@ export class History implements OnInit, OnDestroy {
   
   getSimilarityPercent(score: number | undefined): number {
     if (score === undefined) return 0;
-    return Math.round((1 - score / 2) * 100);
+    return Math.min(100, Math.round((1 - score / 2) * 100));
   }
 
   formatDate(iso: string): string {

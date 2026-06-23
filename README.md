@@ -8,9 +8,10 @@
 [![Cosmos DB](https://img.shields.io/badge/Cosmos_DB-Vector_Search-0078D4?logo=microsoftazure&logoColor=white)](https://learn.microsoft.com/en-us/azure/cosmos-db)
 [![Azure AI](https://img.shields.io/badge/Azure_AI-Document_Intelligence-0078D4?logo=microsoftazure&logoColor=white)](https://learn.microsoft.com/en-us/azure/ai-services/document-intelligence)
 [![SignalR](https://img.shields.io/badge/Azure-SignalR_Service-0078D4?logo=microsoftazure&logoColor=white)](https://learn.microsoft.com/en-us/azure/azure-signalr)
+[![Event Grid](https://img.shields.io/badge/Azure-Event_Grid-0078D4?logo=microsoftazure&logoColor=white)](https://learn.microsoft.com/en-us/azure/event-grid)
 [![TailwindCSS](https://img.shields.io/badge/TailwindCSS-3.x-06B6D4?logo=tailwindcss&logoColor=white)](https://tailwindcss.com)
 
-> Upload any document — CV, invoice, receipt, certificate, or ID — and have Azure AI Document Intelligence extract structured data, generate semantic embeddings, and find similar documents using vector search. Results stream to the browser in real time via Azure SignalR Service.
+> Upload any document — CV, invoice, receipt, certificate, or ID — and have Azure AI extract structured data, generate semantic embeddings, and find similar documents using vector search. Processing is triggered automatically via Azure Event Grid. Results stream to the browser in real time via Azure SignalR Service.
 
 **Live site:** [https://salmon-wave-012e1d61e.7.azurestaticapps.net](https://salmon-wave-012e1d61e.7.azurestaticapps.net)
 
@@ -23,14 +24,19 @@ Browser (Angular 17+)
   │
   │  1. POST /api/get-upload-url  → SAS URL (10 min, create+write only)
   │  2. PUT  file directly to Blob Storage via SAS URL (no Function proxy)
-  │  3. POST /api/process-document
-  │         ├── download blob
-  │         ├── Azure AI Document Intelligence (prebuilt model routing)
-  │         ├── generate 384-dim embedding (all-MiniLM-L6-v2, ONNX)
-  │         ├── upsert to Cosmos DB (fields + embedding + vector index)
-  │         └── push via SignalR → browser updates in real time
+  │         │
+  │         └── BlobCreated event → Azure Event Grid
+  │                                       │
+  │                                       ▼
+  │                          Standalone Azure Function App
+  │                          (process-document-eventgrid)
+  │                                ├── download blob
+  │                                ├── Azure AI Document Intelligence
+  │                                ├── generate 384-dim embedding (ONNX)
+  │                                ├── upsert to Cosmos DB
+  │                                └── push via SignalR → browser updates
   │
-  │  4. GET  /api/get-results         → all history (embedding stripped)
+  │  3. GET  /api/get-results         → all history (embedding stripped)
   │     GET  /api/results/:id         → single result
   │     GET  /api/find-similar/:id    → top 5 by cosine distance
   │     POST /api/search-documents    → semantic search (embed query → VectorDistance)
@@ -39,18 +45,21 @@ Browser (Angular 17+)
 Azure Static Web Apps
   ├── Angular 17+ Frontend       (standalone, signals, lazy routes)
   ├── getUploadUrl Function      (POST) SAS token generation
-  ├── processDocument Function   (POST) AI extraction + embedding + SignalR push
   ├── getResults Function        (GET)  all results from Cosmos DB
   ├── getResultById Function     (GET)  point read by id
   ├── findSimilar Function       (GET)  vector similarity: top 5 by VectorDistance
   ├── searchDocuments Function   (POST) embed query → vector search
   └── signalrNegotiate Function  (GET/POST) WebSocket connection token
+
+Standalone Azure Function App (ai-doc-eventgrid-processor)
+  └── processDocumentEventGrid   (POST) Event Grid webhook receiver
            │
            ▼
-  Azure Cosmos DB (NoSQL + vector index, partition key /id)
-  Azure SignalR Service (Serverless mode, docIntelligence hub)
+  Azure Cosmos DB    (NoSQL + vector index, partition key /id)
+  Azure SignalR      (Serverless, docIntelligence hub)
   Azure Blob Storage (SAS-scoped upload, /documents container)
-  Azure AI Document Intelligence (prebuilt models per document type)
+  Azure AI Doc Intel (prebuilt models per document type)
+  Azure Event Grid   (BlobCreated subscription on /documents container)
 
 GitHub Actions
   ├── 53 Cypress E2E tests (gate deployment)
@@ -62,16 +71,17 @@ GitHub Actions
 
 ## The upload and processing flow in detail
 
-The most important architectural decisions in this project are about what goes where:
-
 **1. Angular uploads directly to Blob Storage, not through a Function.**
-The `getUploadUrl` Function generates a SAS (Shared Access Signature) URL with `cw` (create + write) permissions and a 10-minute expiry. Angular `PUT`s the file directly to Blob Storage using this URL — the Function never handles binary payloads. This eliminates memory pressure on the Function, makes upload speed independent of Function cold starts, and scopes the SAS token so a compromised token can only write one specific blob.
+The `getUploadUrl` Function generates a SAS (Shared Access Signature) URL with `cw` (create + write) permissions and a 10-minute expiry. Angular `PUT`s the file directly to Blob Storage — the Function never handles binary payloads. This eliminates memory pressure, makes upload speed independent of Function cold starts, and scopes the token so a compromised SAS can only write one specific blob. `startsOn` is set 5 minutes in the past to absorb clock skew — a common cause of 403 errors in production.
 
-**2. Embeddings are generated in the Function, stored in Cosmos DB, never sent to the frontend.**
-After AI extraction, the Function generates a 384-dimension semantic embedding using `all-MiniLM-L6-v2` (ONNX, via `@xenova/transformers`). The model runs inside the Function — no external embedding API call needed. The embedding is stored alongside the extraction result in Cosmos DB. When the history list is returned to Angular, the embedding field is stripped — it's a 384-element float array that Angular doesn't need for rendering.
+**2. Event Grid triggers processing automatically.**
+Azure Event Grid subscribes to `BlobCreated` events on the `/documents` container. When a blob lands, Event Grid delivers a webhook POST to a standalone Azure Function App (`ai-doc-eventgrid-processor`). The Function handles the validation handshake on subscription creation, then processes each `BlobCreated` event by extracting the blob path from the event payload. An idempotency check prevents duplicate processing if Event Grid retries — the Function always returns HTTP 200 so Event Grid never retries due to a 5xx response. The standalone Function App was necessary because Azure Static Web Apps Free tier doesn't support Event Grid webhook subscriptions (requires Standard SKU).
 
-**3. SignalR replaces polling.**
-Instead of polling `GET /api/get-results` every N seconds, Angular holds a WebSocket connection to Azure SignalR Service. When `processDocument` finishes, it uses a SignalR output binding to push the completed result to every connected client instantly. Angular `upserts` it into the results list — updating in place if the result already exists, prepending if it's new.
+**3. Embeddings are generated in the Function, stored in Cosmos DB, never sent to the frontend.**
+After AI extraction, the Function generates a 384-dimension semantic embedding using `all-MiniLM-L6-v2` (ONNX, via `@xenova/transformers`). The model runs inside the Function on Windows Consumption plan — no external embedding API call needed. The same model is used for both indexing documents and embedding search queries, so vector distances are directly comparable.
+
+**4. SignalR pushes results to the browser in real time.**
+Angular holds a persistent WebSocket connection to Azure SignalR Service via the `negotiate` Function. When processing completes, the Event Grid Function uses a SignalR output binding to push the result to every connected client. Angular upserts it into the results list — updating in place if the document already exists, prepending if new.
 
 ---
 
@@ -82,14 +92,16 @@ Instead of polling `GET /api/get-results` every N seconds, Angular holds a WebSo
 | Frontend | Angular 17+ (standalone) | SPA with signals, lazy routes, drag and drop |
 | Styling | Tailwind CSS 3 | Utility-first responsive design |
 | Upload | Azure Blob Storage + SAS | Direct browser-to-storage upload |
+| Event trigger | Azure Event Grid | BlobCreated → processDocumentEventGrid |
 | AI extraction | Azure AI Document Intelligence | Prebuilt models for 5 document types |
 | Embeddings | all-MiniLM-L6-v2 (ONNX) | 384-dim semantic embeddings, no external API |
 | Vector search | Cosmos DB vector index | Cosine similarity search via VectorDistance() |
-| Backend | Azure Functions v4 (Node.js) | 7 HTTP-triggered serverless Functions |
+| SWA Functions | Azure Functions v4 (Node.js) | 6 HTTP-triggered Functions on SWA managed host |
+| Event Function | Azure Functions v4 (Node.js) | Standalone Function App for Event Grid webhook |
 | Database | Azure Cosmos DB (NoSQL) | Extraction results + vector index, partition key `/id` |
 | Real-time | Azure SignalR Service | WebSocket push — processing → completed instantly |
 | Hosting | Azure Static Web Apps | Unified frontend + API hosting |
-| Testing | Cypress | 41 E2E tests gating every deployment |
+| Testing | Cypress | 53 E2E tests gating every deployment |
 | CI/CD | GitHub Actions | Test → build → deploy → smoke test pipeline |
 | Language | TypeScript (ES2020) | Frontend and backend |
 
@@ -105,23 +117,22 @@ Instead of polling `GET /api/get-results` every N seconds, Angular holds a WebSo
 | Certificate | `prebuilt-document` | Title, issuer, holder, date | Title, IssuedTo, IssuedBy |
 | ID Document | `prebuilt-idDocument` | Name, DOB, ID number | FirstName, LastName, Nationality |
 
-Each document type maps to the most accurate prebuilt model for that domain. The embedding is generated from a curated subset of high-value fields per type — not all extracted text — to maximise semantic similarity relevance.
-
 ---
 
 ## AI-200 exam domains this project covers
 
 | AI-200 Domain | How this project covers it |
 |---|---|
-| Implement Azure Functions | 7 HTTP-triggered Functions in Node.js v4 programming model with input/output bindings |
-| Develop solutions using Blob Storage | SAS token generation, scoped permissions, direct browser upload, blob download |
-| Develop solutions using Cosmos DB | NoSQL document storage, point reads, upsert, vector indexing policy, VectorDistance queries |
-| Implement Azure AI services | Document Intelligence REST API, prebuilt model routing, confidence scores |
-| Implement real-time solutions | SignalR output binding, negotiate Function, WebSocket connection management |
-| Implement vector search | 384-dim embeddings, cosine distance, semantic search, find similar documents |
+| Implement Azure Functions | 7 HTTP-triggered Functions across two hosting models: SWA managed host and standalone Consumption plan |
+| Develop solutions using Blob Storage | SAS token generation, scoped permissions, direct browser upload, blob download in Function |
+| Develop solutions using Cosmos DB | NoSQL storage, point reads (~1 RU), upsert, vector indexing policy, VectorDistance queries |
+| Implement Azure AI services | Document Intelligence REST API, prebuilt model routing per document type, confidence scores |
+| Implement event-driven solutions | Event Grid BlobCreated subscription, webhook validation handshake, retry idempotency pattern |
+| Implement real-time solutions | SignalR output binding, negotiate Function, WebSocket connection with auto-reconnect |
+| Implement vector search | 384-dim ONNX embeddings, cosine distance, semantic search, find similar documents |
 | Secure Azure solutions | SAS token scoping, env var secret management, never committing credentials |
-| Monitor and troubleshoot | Application Insights across Angular frontend and Azure Functions |
-| Connect and consume Azure services | Coordinating Blob, Cosmos DB, AI, SignalR, and embeddings in one pipeline |
+| Monitor and troubleshoot | Application Insights across Angular, SWA Functions, and standalone Function App |
+| Connect and consume Azure services | Coordinating Blob, Event Grid, Cosmos DB, AI, SignalR, and embeddings in one pipeline |
 
 ---
 
@@ -133,59 +144,65 @@ azure-ai-doc-intelligence/
 │   ├── cypress/
 │   │   ├── e2e/
 │   │   │   ├── upload.cy.ts          # 15 upload tests
-│   │   │   ├── history.cy.ts         # 12 history tests
-│   │   │   └── result.cy.ts          # 14 result tests
+│   │   │   ├── history.cy.ts         # 18 history + semantic search tests
+│   │   │   └── result.cy.ts          # 20 result + find similar tests
 │   │   └── fixtures/
 │   │       ├── extraction-results.json
 │   │       ├── extraction-result.json
-│   │       └── upload-url.json
+│   │       ├── upload-url.json
+│   │       └── similar-results.json
 │   ├── src/
 │   │   ├── app/
 │   │   │   ├── core/
 │   │   │   │   ├── models/
 │   │   │   │   │   └── document.model.ts         # ExtractionResult, DocumentType, DOCUMENT_TYPE_CONFIG
 │   │   │   │   └── services/
-│   │   │   │       ├── api.service.ts             # HTTP calls to all 7 Functions
-│   │   │   │       ├── upload.service.ts          # SAS upload + processDocument orchestration
+│   │   │   │       ├── api.service.ts             # HTTP calls to all 6 SWA Functions
+│   │   │   │       ├── upload.service.ts          # SAS upload, no explicit processDocument call
 │   │   │   │       └── signalr.service.ts         # WebSocket connection + event subscription
 │   │   │   ├── features/
 │   │   │   │   ├── upload/                        # Drag and drop, type selector, progress bar
 │   │   │   │   ├── result/                        # Fields, confidence, raw JSON, find similar
-│   │   │   │   └── history/                       # SignalR live updates, semantic search bar
-│   │   │   ├── app.component.ts
-│   │   │   ├── app.config.ts
+│   │   │   │   └── history/                       # SignalR live indicator, semantic search bar
 │   │   │   └── app.routes.ts                      # Lazy-loaded: /upload /result/:id /history
-│   │   ├── environments/
-│   │   │   ├── environment.ts
-│   │   │   └── environment.prod.ts
-│   │   └── styles.css
-│   ├── proxy.conf.json                            # /api → localhost:7071 (dev only)
+│   │   └── environments/
+│   │       ├── environment.ts
+│   │       └── environment.prod.ts
+│   ├── public/
+│   │   └── staticwebapp.config.json              # SPA routing — copied into build output
 │   └── angular.json
 │
-├── api/                               # Azure Functions v4
+├── api/                               # Azure Functions on SWA managed host
 │   ├── src/
 │   │   ├── index.ts                              # Entry point — imports all Functions
 │   │   ├── functions/
 │   │   │   ├── getUploadUrl.ts                   # POST /api/get-upload-url
-│   │   │   ├── processDocument.ts                # POST /api/process-document
 │   │   │   ├── getResults.ts                     # GET  /api/get-results
 │   │   │   ├── getResultById.ts                  # GET  /api/results/{id}
 │   │   │   ├── findSimilar.ts                    # GET  /api/find-similar/{id}
 │   │   │   ├── searchDocuments.ts                # POST /api/search-documents
 │   │   │   └── signalrNegotiate.ts               # GET/POST /api/negotiate
 │   │   └── services/
-│   │       ├── blobService.ts                    # Blob download helper
+│   │       ├── blobService.ts
 │   │       ├── cosmosService.ts                  # Point reads, upsert, VectorDistance query
-│   │       ├── documentIntelligenceService.ts    # AI extraction, prebuilt model routing
+│   │       ├── documentIntelligenceService.ts
 │   │       ├── embeddingService.ts               # all-MiniLM-L6-v2 ONNX singleton
 │   │       └── fieldExtractor.ts                 # High-value field selection per document type
-│   ├── host.json
-│   ├── local.settings.json                       # ⚠️ git-ignored — never commit
-│   ├── local.settings.example.json               # Safe placeholder for contributors
 │   └── tsconfig.json
 │
-├── staticwebapp.config.json           # SWA routing — SPA fallback, API passthrough
-├── frontend/public/staticwebapp.config.json  # Copied into build output for SPA routing
+├── api-eventgrid/                     # Standalone Function App for Event Grid
+│   ├── src/
+│   │   ├── index.ts
+│   │   ├── functions/
+│   │   │   └── processDocumentEventGrid.ts       # POST — Event Grid webhook receiver
+│   │   └── services/                             # Shared copies of api/ services
+│   │       ├── blobService.ts
+│   │       ├── cosmosService.ts                  # Includes findByBlobName() for idempotency
+│   │       ├── documentIntelligenceService.ts
+│   │       ├── embeddingService.ts
+│   │       └── fieldExtractor.ts
+│   └── host.json
+│
 └── .github/
     └── workflows/
         └── azure-static-web-apps-salmon-wave-012e1d61e.yml
@@ -196,25 +213,28 @@ azure-ai-doc-intelligence/
 ## Key Technical Decisions
 
 ### SAS-based direct upload
-Files never route through a Function. The `getUploadUrl` Function generates a SAS URL with `cw` (create + write) permissions and a 10-minute expiry window. `startsOn` is set 5 minutes in the past to absorb clock skew between the client and Azure — a common cause of 403 errors in production. Angular `PUT`s directly to Blob Storage, then explicitly calls `POST /api/process-document` with the blob name.
+Files never route through a Function. The `getUploadUrl` Function generates a SAS URL with `cw` (create + write) permissions and a 10-minute expiry. `startsOn` is set 5 minutes in the past to absorb clock skew. Angular `PUT`s directly to Blob Storage — once the upload completes, Angular navigates to history and waits for the SignalR push.
 
-### HTTP trigger instead of blob trigger
-Azure Static Web Apps only supports HTTP-triggered Functions in its managed host. Blob triggers require Webjobs storage infrastructure that SWA doesn't expose. Converting to an explicit HTTP call makes processing synchronous from Angular's perspective — the Function returns the `resultId` directly, so Angular navigates straight to the result page without polling.
+### Event Grid for event-driven processing
+Rather than having Angular explicitly call a processing endpoint after upload, Azure Event Grid subscribes to `BlobCreated` events on the storage container. This decouples upload from processing — if the browser closes immediately after the upload completes, processing still runs. The Event Grid Function handles the validation handshake by echoing back the `validationCode`. It always returns HTTP 200 — even on errors — to prevent Event Grid's retry mechanism from causing duplicate processing records. An idempotency check (`findByBlobName`) ensures that if Event Grid does retry, already-completed documents are skipped.
+
+### Standalone Function App for Event Grid (not SWA managed host)
+Azure Static Web Apps Free tier only supports HTTP-triggered Functions on its managed host — Event Grid webhook subscriptions require Standard SKU. A separate Consumption plan Function App (`ai-doc-eventgrid-processor`) is used for the Event Grid receiver. This is free (Consumption plan billing) and demonstrates multi-host Azure Functions architecture. Linux Consumption was avoided after runtime instability with Node.js v4; Windows Consumption resolved the issue.
 
 ### ONNX embeddings inside the Function
-`all-MiniLM-L6-v2` runs entirely inside the Azure Function via `@xenova/transformers` and ONNX Runtime — no external embedding API call, no Azure OpenAI dependency, no cost. The model is cached to `/tmp/models` after the first cold start. The same model is used for both indexing documents and embedding search queries, so vector distances are directly comparable.
+`all-MiniLM-L6-v2` runs inside the Azure Function via `@xenova/transformers` — no Azure OpenAI dependency, no external API cost. The model is cached after the first cold start. The same model is used for both indexing and querying so vector distances are directly comparable.
 
 ### High-value field selection for embeddings
-Rather than embedding all extracted text, each document type maps to a curated set of high-value fields. A CV embedding includes Name, Skills, and Experience — not page numbers or formatting artifacts. This improves semantic similarity relevance significantly: two CVs for Angular developers will cluster closer together than a CV and an invoice with the same word count.
+Each document type maps to a curated set of high-value fields for embedding. A CV embedding includes Name, Skills, and Experience — not page numbers or formatting artifacts. This improves semantic similarity: two CVs for Angular developers cluster closer together than a CV and an invoice with the same word count.
 
 ### Cosmos DB vector index with cosine distance
-The container uses a `flat` vector index — correct for a portfolio-scale dataset with no minimum document count requirement. The partition key is `/id` enabling point reads (~1 RU) instead of queries (~2.5 RU) for single-document lookups. The embedding field is excluded from the standard indexing policy to avoid unnecessary index overhead.
+The container uses a `flat` vector index suitable for portfolio-scale datasets. Partition key `/id` enables point reads (~1 RU) instead of cross-partition queries. The embedding field is excluded from the standard indexing policy. The vector search query uses `IS_ARRAY(c.embedding)` to filter out documents without embeddings.
 
 ### SignalR replaces polling
-The history page holds a persistent WebSocket connection via Azure SignalR Service. When `processDocument` completes, it uses a SignalR output binding to push the result to all connected clients. Angular upserts it — updating in place if the document already exists in the list, prepending if it's new. `withAutomaticReconnect([0, 2000, 5000, 10000])` handles connection drops with exponential backoff.
+The history page holds a persistent WebSocket connection. When the Event Grid Function completes processing, it uses a SignalR output binding to push the result to all connected clients. Angular upserts it — updating in place or prepending as new. `withAutomaticReconnect([0, 2000, 5000, 10000])` handles connection drops with exponential backoff.
 
 ### Embedding stripped from API responses
-The 384-element float array is stored in Cosmos DB for vector queries but stripped before returning results to Angular. `getAllResults()` maps the response through `({ embedding, ...rest }) => rest` before returning. This keeps the API payload lean and avoids sending ~6KB of float data per result on every history page load.
+The 384-element float array is stored in Cosmos DB but stripped before returning to Angular. `getAllResults()` maps through `({ embedding, ...rest }) => rest`. This keeps API payloads lean — avoids ~6KB of float data per result on every history page load.
 
 ---
 
@@ -225,97 +245,36 @@ The 384-element float array is stored in Cosmos DB for vector queries but stripp
 - Angular CLI: `npm install -g @angular/cli`
 - Azure Functions Core Tools v4: `npm install -g azure-functions-core-tools@4`
 
-### 1. Clone the repo
+### 1. Clone and configure
 ```bash
 git clone https://github.com/Madisengm/azure-ai-doc-intelligence.git
 cd azure-ai-doc-intelligence
+cd api && cp local.settings.example.json local.settings.json
 ```
 
-### 2. Configure environment variables
+### 2. Start the API (SWA Functions)
 ```bash
-cd api
-cp local.settings.example.json local.settings.json
+cd api && npm install && npm run start
 ```
 
-Edit `local.settings.json`:
-```json
-{
-  "IsEncrypted": false,
-  "Values": {
-    "AzureWebJobsStorage": "DefaultEndpointsProtocol=https;AccountName=...;AccountKey=...;EndpointSuffix=core.windows.net",
-    "FUNCTIONS_WORKER_RUNTIME": "node",
-    "STORAGE_ACCOUNT": "DefaultEndpointsProtocol=https;AccountName=...;AccountKey=...;EndpointSuffix=core.windows.net",
-    "STORAGE_ACCOUNT_NAME": "YOUR_STORAGE_ACCOUNT_NAME",
-    "STORAGE_ACCOUNT_KEY": "YOUR_STORAGE_KEY",
-    "STORAGE_CONTAINER_NAME": "documents",
-    "COSMOS_DB_ENDPOINT": "https://YOUR_ACCOUNT.documents.azure.com:443/",
-    "COSMOS_DB_KEY": "YOUR_COSMOS_KEY",
-    "COSMOS_DB_DATABASE": "YOUR_DATABASE_NAME",
-    "COSMOS_DB_CONTAINER": "results",
-    "DOCUMENT_INTELLIGENCE_ENDPOINT": "https://YOUR_RESOURCE.cognitiveservices.azure.com/",
-    "DOCUMENT_INTELLIGENCE_KEY": "YOUR_KEY",
-    "AZURE_SIGNALR_CONNECTION_STRING": "YOUR_SIGNALR_CONNECTION_STRING"
-  }
-}
-```
-
-### 3. Configure Blob Storage CORS for local development
+### 3. Start the frontend
 ```bash
-az storage cors add \
-  --account-name YOUR_STORAGE_ACCOUNT \
-  --services b \
-  --methods GET PUT POST DELETE OPTIONS HEAD \
-  --origins "http://localhost:4200" \
-  --allowed-headers "*" \
-  --exposed-headers "*" \
-  --max-age 3600
+cd frontend && npm install && ng serve
 ```
 
-### 4. Start the API
-```bash
-cd api
-npm install
-npm run start
-```
-
-All 7 Functions register:
-```
-Functions:
-  find-similar:       [GET,OPTIONS]       http://localhost:7071/api/find-similar/{id}
-  get-result-by-id:   [GET,OPTIONS]       http://localhost:7071/api/results/{id}
-  get-results:        [GET,OPTIONS]       http://localhost:7071/api/get-results
-  get-upload-url:     [POST,OPTIONS]      http://localhost:7071/api/get-upload-url
-  process-document:   [POST,OPTIONS]      http://localhost:7071/api/process-document
-  search-documents:   [POST,OPTIONS]      http://localhost:7071/api/search-documents
-  signalr-negotiate:  [GET,POST,OPTIONS]  http://localhost:7071/api/negotiate
-```
-
-### 5. Start the frontend
-```bash
-cd frontend
-npm install
-ng serve
-```
+> The Event Grid Function (`api-eventgrid/`) only runs in Azure — it requires a real Event Grid subscription. For local development, use the SWA `processDocument` Function directly.
 
 ---
 
 ## Testing
 
-41 E2E tests across 3 spec files, all mocked against fixtures — no real Azure calls needed to run the suite.
+53 E2E tests across 3 spec files, all mocked — no real Azure calls needed.
 
 | Spec | Tests | What is tested |
 |---|---|---|
-| `upload.cy.ts` | 15 | Page rendering, document type selection, file validation, upload flow |
-| `history.cy.ts` | 12 | Results list, status badges, confidence scores, empty state, navigation |
-| `result.cy.ts` | 14 | Field cards, confidence badges, raw JSON toggle, back navigation |
-
-```bash
-# Terminal 1
-cd frontend && ng serve
-
-# Terminal 2
-cd frontend && npm run cypress:run
-```
+| `upload.cy.ts` | 15 | Rendering, type selection, file validation, upload flow, Event Grid success message |
+| `history.cy.ts` | 18 | Results list, status badges, confidence scores, semantic search bar, empty state |
+| `result.cy.ts` | 20 | Field cards, confidence badges, raw JSON toggle, find similar, navigation |
 
 ---
 
@@ -325,24 +284,12 @@ cd frontend && npm run cypress:run
 Generates a SAS URL for direct browser upload.
 
 **Request:** `{ "fileName": "cv.pdf", "fileType": "application/pdf", "documentType": "cv" }`
-
 **Response:** `{ "sasUrl": "https://...?sp=cw&sig=...", "blobName": "cv/1234-cv.pdf", "documentType": "cv" }`
-
----
-
-### `POST /api/process-document`
-Downloads blob, runs AI extraction, generates embedding, saves to Cosmos DB, pushes via SignalR.
-
-**Request:** `{ "blobName": "cv/1234-cv.pdf", "documentType": "cv" }`
-
-**Response:** `{ "id": "uuid", "status": "completed" }`
 
 ---
 
 ### `GET /api/get-results`
 All results ordered by `processedAt` descending. Embedding stripped from response.
-
-**Response:** `{ "results": [{ "id": "...", "fileName": "...", "fields": {...}, ... }] }`
 
 ---
 
@@ -352,45 +299,45 @@ Single result by id (point read, ~1 RU).
 ---
 
 ### `GET /api/find-similar/{id}`
-Top 5 documents most similar to the given id using cosine vector distance.
+Top 5 documents most similar to the given id using cosine vector distance. Requires the source document to have an embedding.
 
-**Response:** `{ "results": [{ ...result, "similarityScore": 0.12 }] }` *(lower score = more similar in cosine distance)*
+**Response:** `{ "results": [{ ...result, "similarityScore": 0.12 }] }`
 
 ---
 
 ### `POST /api/search-documents`
-Embeds the query string and runs a vector similarity search across all documents.
+Embeds the query string using the same ONNX model used for indexing, then runs a vector similarity search.
 
 **Request:** `{ "query": "Angular developer with Azure experience" }`
-
 **Response:** `{ "results": [{ ...result, "similarityScore": 0.26 }] }`
 
 ---
 
 ### `GET /api/negotiate`
-Returns WebSocket connection info for Azure SignalR Service. Called once by the Angular SignalR client on history page mount.
+Returns WebSocket connection info for Azure SignalR Service.
+
+---
+
+### `POST /api/process-document-eventgrid` (standalone Function App)
+Receives Event Grid webhook events. Handles the validation handshake and processes `BlobCreated` events. Always returns HTTP 200. Includes idempotency check to prevent duplicate records on Event Grid retries.
 
 ---
 
 ## Deployment
 
-Every `git push` to `main` runs four jobs in sequence:
+### SWA (frontend + API Functions)
+Every `git push` to `main` runs four jobs:
+1. **Cypress** — 53 E2E tests. Blocks deploy on failure.
+2. **Build and Deploy** — Oryx builds Angular + TypeScript, deploys to SWA.
+3. **Smoke test** — Cypress runs against live production URL.
+4. **Close PR** — tears down preview environment on PR close.
 
-1. **Cypress** — 41 E2E tests against `ng serve`. Blocks all downstream jobs on failure.
-2. **Build and Deploy** — Oryx builds Angular and TypeScript, deploys to Azure Static Web Apps.
-3. **Smoke test** — Cypress runs `upload.cy.ts` and `history.cy.ts` against the live production URL.
-4. **Close PR** — tears down the preview environment on PR close.
-
+### Event Grid Function App
+Deployed independently via Azure Functions Core Tools:
 ```bash
-az staticwebapp appsettings set \
-  --name ai-doc-intelligence \
-  --setting-names \
-    STORAGE_ACCOUNT="..." \
-    COSMOS_DB_ENDPOINT="..." \
-    COSMOS_DB_KEY="..." \
-    DOCUMENT_INTELLIGENCE_ENDPOINT="..." \
-    DOCUMENT_INTELLIGENCE_KEY="..." \
-    AZURE_SIGNALR_CONNECTION_STRING="..."
+cd api-eventgrid
+npm run build
+func azure functionapp publish ai-doc-eventgrid-processor --build local
 ```
 
 ---
@@ -401,10 +348,13 @@ az staticwebapp appsettings set \
 |---|---|---|
 | Resource Group | `ai-doc-intelligence-rg` | Container for all project resources |
 | Storage Account | `aidintelstorage` | Blob Storage for uploaded documents |
+| Storage Account | `aidoceventstore` | Runtime storage for Event Grid Function App |
 | Cosmos DB | `madisengazresume` | NoSQL + vector index for extraction results |
-| Document Intelligence | `ai-doc-intelligence` | Azure AI extraction (F0 free tier, 500 pages/month) |
+| Document Intelligence | `ai-doc-intelligence` | Azure AI extraction (F0, 500 pages/month free) |
 | SignalR Service | `ai-doc-signalr` | Real-time WebSocket push (Free_F1, 20k msg/day) |
-| Static Web Apps | `ai-doc-intelligence` | Frontend + Functions hosting (Free tier) |
+| Event Grid Subscription | `doc-blob-created` | BlobCreated → processDocumentEventGrid webhook |
+| Function App | `ai-doc-eventgrid-processor` | Standalone Windows Consumption plan for Event Grid |
+| Static Web Apps | `ai-doc-intelligence` | Frontend + SWA Functions hosting (Free tier) |
 
 ---
 
