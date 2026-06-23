@@ -85,4 +85,14 @@ export class CosmosService {
 
         return resources;
     }
+
+    async findByBlobName(blobName: string): Promise<ExtractionResult | undefined> {
+        const { resources } = await this.container.items
+            .query<ExtractionResult>({
+                query: "SELECT TOP 1 c.id, c.status, c.processedAt FROM c WHERE c.blobName = @blobName",
+                parameters: [{ name: "@blobName", value: blobName }]
+            })
+            .fetchAll();
+        return resources[0];
+    }
 }

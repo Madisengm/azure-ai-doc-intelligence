@@ -82,21 +82,26 @@ export async function processDocumentEventGrid(
         context.log(`Processing ${blobEvents.length} BlobCreated event(s)`);
 
         for (const event of blobEvents) {
-            const blobUrl = event.data.url;
-            if (!blobUrl) continue;
+            try {
+                const blobUrl = event.data.url;
+                if (!blobUrl) continue;
 
-            const containerName = process.env["STORAGE_CONTAINER_NAME"] ?? "documents";
-            const urlParts = blobUrl.split(`/${containerName}/`);
-            if (urlParts.length < 2) continue;
+                const containerName = process.env["STORAGE_CONTAINER_NAME"] ?? "documents";
+                const urlParts = blobUrl.split(`/${containerName}/`);
+                if (urlParts.length < 2) continue;
 
-            const blobName     = urlParts[1].split('?')[0];
-            const blobParts    = blobName.split('/');
-            const documentType = blobParts[0] ?? 'unknown';
-            const fileSegment  = blobParts[1] ?? blobName;
-            const fileName     = fileSegment.replace(/^\d+-/, '');
+                const blobName     = urlParts[1].split('?')[0];
+                const blobParts    = blobName.split('/');
+                const documentType = blobParts[0] ?? 'unknown';
+                const fileSegment  = blobParts[1] ?? blobName;
+                const fileName     = fileSegment.replace(/^\d+-/, '');
 
-            context.log(`Processing blob: ${blobName} (type: ${documentType})`);
-            await processBlob(blobName, documentType, fileName, context);
+                context.log(`Processing blob: ${blobName} (type: ${documentType})`);
+                await processBlob(blobName, documentType, fileName, context);
+
+            } catch (blobError: any) {
+                context.error(`Failed processing blob event:`, blobError);
+            }
         }
 
         return { status: 200, headers, jsonBody: { processed: blobEvents.length } };
@@ -104,7 +109,7 @@ export async function processDocumentEventGrid(
     } catch (error: any) {
         context.error("processDocumentEventGrid error:", error);
         return {
-            status: 500,
+            status: 200,
             headers,
             jsonBody: { error: error?.message ?? "Event processing failed" }
         };
@@ -117,14 +122,20 @@ async function processBlob(
     fileName: string,
     context: InvocationContext
 ): Promise<void> {
-    const resultId = randomUUID();
+    const existing = await getCosmosService().findByBlobName(blobName);
+    if (existing?.status === 'completed') {
+        context.log(`Blob already completed, skipping: ${blobName}`);
+        return;
+    }
+
+    const resultId = existing?.id ?? randomUUID();
 
     const processingRecord: ExtractionResult = {
         id:           resultId,
         blobName,
         documentType: documentType as any,
         fileName,
-        processedAt:  new Date().toISOString(),
+        processedAt:  existing?.processedAt ?? new Date().toISOString(),
         status:       'processing',
         fields:       {},
         pageCount:    0,
@@ -150,6 +161,7 @@ async function processBlob(
     };
 
     await getCosmosService().saveResult(completedRecord);
+    context.log(`Completed result saved: ${resultId}`);
 
     context.extraOutputs.set(signalROutput, {
         target:    'documentProcessed',

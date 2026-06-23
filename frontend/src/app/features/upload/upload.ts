@@ -85,8 +85,6 @@ export class Upload {
 
         if (progress.processingDone) {
           this.uploadState.set('success');
-          // Navigate to history — SignalR will push the result
-          // as soon as Event Grid triggers processing
           setTimeout(() => this.router.navigate(['/history']), 1500);
         }
       },
